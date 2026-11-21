@@ -6,9 +6,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<meta name="apple-mobile-web-app-title" content="YILDIZ Fuhrpark">
+<meta name="apple-mobile-web-app-title" content="YILDIZ TAXI KG">
 <meta name="theme-color" content="#16181d">
-<title>YILDIZ TAXI – Fuhrpark</title>
+<title>YILDIZ TAXI KG</title>
 <link rel="manifest" href="manifest.json?v=2">
 <link rel="apple-touch-icon" href="icon-180.png?v=2">
 <link rel="icon" href="icon-192.png?v=2">
@@ -292,7 +292,7 @@ async function pushCard(box) {
     const reg = await navigator.serviceWorker.getRegistration();
     const sub = reg && await reg.pushManager.getSubscription();
     if (sub && Notification.permission === 'granted') { setStat('✅ Auf diesem Gerät eingeschaltet', true); on.textContent = 'Erneut verbinden'; }
-    else if (Notification.permission === 'denied') setStat('❌ Benachrichtigungen sind blockiert. iPhone: Einstellungen → Mitteilungen → YILDIZ Fuhrpark → Erlauben.');
+    else if (Notification.permission === 'denied') setStat('❌ Benachrichtigungen sind blockiert. iPhone: Einstellungen → Mitteilungen → YILDIZ TAXI KG → Erlauben.');
     else setStat('Auf diesem Gerät noch aus.');
   }
   on.onclick = async () => {

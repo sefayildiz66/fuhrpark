@@ -1,6 +1,6 @@
 {
-  "name": "YILDIZ TAXI Fuhrpark",
-  "short_name": "YILDIZ Fuhrpark",
+  "name": "YILDIZ TAXI KG",
+  "short_name": "YILDIZ TAXI KG",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
