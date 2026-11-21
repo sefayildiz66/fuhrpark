@@ -9,6 +9,9 @@
 <meta name="apple-mobile-web-app-title" content="YILDIZ Fuhrpark">
 <meta name="theme-color" content="#16181d">
 <title>YILDIZ TAXI – Fuhrpark</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
@@ -86,6 +89,7 @@ textarea.out{width:100%;font:14px/1.45 ui-monospace,Menlo,monospace;padding:10px
 // ======= Einstellungen =======
 const SUPABASE_URL = 'https://kckxddllyfuhzchdqxyx.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_BQMlmkgUgvmkP1gQcDaoEQ_6C-dEgP7';
+const VAPID_PUBLIC = 'BM-zXGUDk3PY36P1noVlNCO_s-enJ4tlW2ZRmnq2eFpIyygQNrGhgd9aqvipt_Bc-8EA20EHpzaLs7isogIS0xw';
 // =============================
 
 const sb = window.supabase ? window.supabase.createClient(SUPABASE_URL.startsWith('__') ? 'https://invalid.supabase.co' : SUPABASE_URL, SUPABASE_KEY) : null;
@@ -168,6 +172,7 @@ async function loadBase() {
 // ---------- Start ----------
 async function boot() {
   closeModal();
+  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
   if (!sb) { $('#app').innerHTML = '<div class="card" style="margin:20px">Keine Internetverbindung – Seite neu laden.</div>'; return; }
   if (SUPABASE_URL.startsWith('__')) { $('#app').innerHTML = '<div class="card" style="margin:20px">Supabase-Adresse und Schlüssel sind noch nicht eingetragen.</div>'; return; }
   const { data: { session } } = await sb.auth.getSession();
@@ -212,6 +217,7 @@ function loginView(mode = 'in') {
 const TABS = [['home', '🏠', 'Übersicht'], ['cases', '📄', 'Vorgänge'], ['who', '🔎', 'Wer fuhr?'], ['assign', '🚕', 'Zuteilung'], ['stamm', '⚙️', 'Stammdaten']];
 function adminShell() {
   $('#app').innerHTML = `<header class="top"><div class="brand">YILDIZ <span>TAXI</span></div><button class="btn sm pri" id="newCase">+ Vorgang</button></header>
+    <div id="urgent" style="max-width:820px;margin:0 auto;padding:0 14px"></div>
     <main id="main"></main>
     <nav class="bottom">${TABS.map(([k, i, l]) => `<button data-tab="${k}"><span class="ic">${i}</span>${l}</button>`).join('')}</nav>`;
   $('nav.bottom').onclick = e => { const b = e.target.closest('[data-tab]'); if (b) go(b.dataset.tab); };
@@ -225,6 +231,7 @@ function adminShell() {
 function go(tab) {
   S.tab = tab;
   $$('nav.bottom button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
+  updateUrgent();
   const m = $('#main'); m.innerHTML = '<div class="empty">Lädt…</div>';
   ({ home: viewHome, cases: viewCases, who: viewWho, assign: viewAssign, stamm: viewStamm })[tab](m)
     .catch(e => { m.innerHTML = `<div class="card">Fehler: ${esc(errMsg(e))}</div>`; });
@@ -249,6 +256,70 @@ function caseItem(c) {
     <div class="row" style="justify-content:space-between"><span class="badge ${k.b}">${k.l}</span><span style="font-size:14px">${dueInfo(c) || esc(STATUS[c.status])}</span></div>
     <div class="t" style="margin-top:6px">${esc(c.reference || c.offense || c.authority || 'ohne Aktenzeichen')}</div>
     <div class="s">${sub}</div></button>`;
+}
+
+
+// ---------- Roter Hinweis: offene Fristen ----------
+async function updateUrgent() {
+  const el = $('#urgent'); if (!el) return;
+  const { data } = await sb.from('cases').select('id,due_at').eq('status', 'offen').not('due_at', 'is', null).lte('due_at', addDays(today(), 3));
+  const n = (data || []).length, over = (data || []).filter(c => daysUntil(c.due_at) < 0).length, soon = n - over;
+  el.innerHTML = n ? `<button class="item" id="urgBtn" style="margin:12px 0 0;background:${over ? '#fff5f4' : '#fffbea'};border-color:${over ? '#f4b4ae' : '#ecd98f'}">
+      <b class="${over ? 'due-red' : 'due-org'}">⏰ ${[over ? over + ' überfällig' : '', soon ? soon + ' in ≤ 3 Tagen fällig' : ''].filter(Boolean).join(' · ')}</b>
+      <div class="s">Noch nicht bezahlt / kein Einspruch / nicht beantwortet – jetzt ansehen</div></button>` : '';
+  const b = $('#urgBtn'); if (b) b.onclick = () => { S.caseFilter = 'open'; S.caseKind = ''; S.caseQ = ''; go('cases'); };
+  try { if (navigator.setAppBadge) n ? navigator.setAppBadge(n) : navigator.clearAppBadge(); } catch {}
+}
+
+// ---------- Push-Erinnerungen ----------
+const b64u = s => { const p = '='.repeat((4 - s.length % 4) % 4); const b = atob((s + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(b, c => c.charCodeAt(0)); };
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+async function pushCard(box) {
+  const hour = S.settings.reminder_hour ?? 8;
+  box.innerHTML = `<h3>Erinnerungen aufs Handy</h3>
+    <div id="pstat" class="s" style="margin-bottom:10px">Prüfe…</div>
+    <label class="f">Täglich erinnern um<select id="rhour">${Array.from({ length: 24 }, (_, i) => `<option value="${i}" ${i === hour ? 'selected' : ''}>${pad2(i)}:00 Uhr</option>`).join('')}</select></label>
+    <div class="row"><button class="btn pri" id="pon">Benachrichtigungen einschalten</button><button class="btn" id="ptest">Test senden</button></div>
+    <div class="s" style="font-size:12px;margin-top:10px">Du wirst erinnert 7, 3, 2 und 1 Tag vor der Frist, am letzten Tag und danach jeden Tag, solange ein Vorgang auf „Offen“ steht. Bei „Einspruch läuft“, „Bezahlt“ oder „Beantwortet“ hört die Erinnerung auf.</div>`;
+  const stat = $('#pstat', box), on = $('#pon', box);
+  const setStat = (t, ok) => { stat.innerHTML = t; stat.style.color = ok ? 'var(--grn)' : ''; };
+  if (!pushSupported() || (isIOS && !isStandalone())) {
+    setStat(isIOS ? '📱 Am iPhone geht das nur aus der Home-Bildschirm-App: in Safari <b>Teilen → „Zum Home-Bildschirm“</b>, dann die App <b>vom Home-Bildschirm</b> öffnen und hier einschalten.' : 'Dieser Browser kann keine Push-Nachrichten. Bitte am Handy (Home-Bildschirm-App) oder in Chrome einschalten.');
+    on.disabled = true;
+  } else {
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sub = reg && await reg.pushManager.getSubscription();
+    if (sub && Notification.permission === 'granted') { setStat('✅ Auf diesem Gerät eingeschaltet', true); on.textContent = 'Erneut verbinden'; }
+    else if (Notification.permission === 'denied') setStat('❌ Benachrichtigungen sind blockiert. iPhone: Einstellungen → Mitteilungen → YILDIZ Fuhrpark → Erlauben.');
+    else setStat('Auf diesem Gerät noch aus.');
+  }
+  on.onclick = async () => {
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') return toast('Benachrichtigungen wurden nicht erlaubt');
+      const reg = await navigator.serviceWorker.register('sw.js'); await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u(VAPID_PUBLIC) });
+      const j = sub.toJSON();
+      const r = await sb.from('push_subscriptions').upsert({ endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, device: navigator.userAgent.slice(0, 150) }, { onConflict: 'endpoint' });
+      if (r.error) return toast(errMsg(r.error));
+      setStat('✅ Auf diesem Gerät eingeschaltet', true); toast('Eingeschaltet – sende Test…');
+      $('#ptest', box).click();
+    } catch (e) { toast('Fehler: ' + (e.message || e)); }
+  };
+  $('#ptest', box).onclick = async () => {
+    const { data, error } = await sb.functions.invoke('fristen-push', { body: { action: 'test' } });
+    if (error) return toast('Fehler beim Senden');
+    toast(data.sent ? `Gesendet an ${data.sent} Gerät${data.sent === 1 ? '' : 'e'}` : 'Noch kein Gerät eingeschaltet');
+  };
+  $('#rhour', box).onchange = async e => {
+    const v = parseInt(e.target.value, 10);
+    const r = await sb.from('settings').update({ reminder_hour: v }).eq('id', 1);
+    if (r.error) return toast(errMsg(r.error));
+    S.settings.reminder_hour = v; toast(`Erinnerung täglich um ${pad2(v)}:00 Uhr`);
+  };
 }
 
 // ---------- Übersicht ----------
@@ -730,7 +801,7 @@ async function assignForm(a, pre = {}, switchMode = false) {
 
 // ---------- Stammdaten ----------
 async function viewStamm(m) {
-  const tabs = [['fahrer', 'Fahrer'], ['autos', 'Fahrzeuge'], ['firma', 'Firma & Konto']];
+  const tabs = [['fahrer', 'Fahrer'], ['autos', 'Fahrzeuge'], ['firma', 'Firma & Erinnerung']];
   m.innerHTML = `<h2>Stammdaten</h2><div class="chips" id="st">${tabs.map(([k, l]) => `<button class="chip ${S.stammTab === k ? 'on' : ''}" data-s="${k}">${l}</button>`).join('')}</div><div id="sbody"></div>`;
   $('#st').onclick = e => { const b = e.target.closest('[data-s]'); if (b) { S.stammTab = b.dataset.s; viewStamm(m); } };
   const sbd = $('#sbody');
@@ -752,6 +823,7 @@ async function viewStamm(m) {
         <h3 style="margin-top:14px">Schichtzeiten</h3>
         <div class="grid2"><label class="f">Tagschicht ab<input type="time" name="day_start" value="${String(st.day_start || '06:00').slice(0, 5)}"></label><label class="f">Nachtschicht ab<input type="time" name="night_start" value="${String(st.night_start || '18:00').slice(0, 5)}"></label></div>
         <button class="btn pri block">Speichern</button></form>
+      <div class="card" id="pushBox"></div>
       <div class="card"><h3>Konto</h3><div class="s" style="margin-bottom:10px">Angemeldet als ${esc(user?.email || '')}</div><button class="btn" id="lo">Abmelden</button></div>`;
     $('#sf').onsubmit = async e => {
       e.preventDefault(); const f = e.target;
@@ -760,6 +832,7 @@ async function viewStamm(m) {
       S.settings = { ...S.settings, ...row }; toast('Gespeichert');
     };
     $('#lo').onclick = async () => { await sb.auth.signOut(); boot(); };
+    pushCard($('#pushBox'));
   }
 }
 async function driverForm(d) {
