@@ -281,9 +281,9 @@ async function pushCard(box) {
   box.innerHTML = `<h3>Erinnerungen aufs Handy</h3>
     <div id="pstat" class="s" style="margin-bottom:10px">Prüfe…</div>
     <label class="f">Täglich erinnern um<select id="rhour">${Array.from({ length: 24 }, (_, i) => `<option value="${i}" ${i === hour ? 'selected' : ''}>${pad2(i)}:00 Uhr</option>`).join('')}</select></label>
-    <div class="row"><button class="btn pri" id="pon">Benachrichtigungen einschalten</button><button class="btn" id="ptest">Test senden</button></div>
+    <div class="row"><button class="btn pri" id="pon">Benachrichtigungen einschalten</button><button class="btn" id="ptest">Test senden</button><button class="btn" id="poff" style="display:none">Ausschalten</button></div>
     <div class="s" style="font-size:12px;margin-top:10px">Du wirst erinnert 7, 3, 2 und 1 Tag vor der Frist, am letzten Tag und danach jeden Tag, solange ein Vorgang auf „Offen“ steht. Bei „Einspruch läuft“, „Bezahlt“ oder „Beantwortet“ hört die Erinnerung auf.</div>`;
-  const stat = $('#pstat', box), on = $('#pon', box);
+  const stat = $('#pstat', box), on = $('#pon', box), off = $('#poff', box);
   const setStat = (t, ok) => { stat.innerHTML = t; stat.style.color = ok ? 'var(--grn)' : ''; };
   if (!pushSupported() || (isIOS && !isStandalone())) {
     setStat(isIOS ? '📱 Am iPhone geht das nur aus der Home-Bildschirm-App: in Safari <b>Teilen → „Zum Home-Bildschirm“</b>, dann die App <b>vom Home-Bildschirm</b> öffnen und hier einschalten.' : 'Dieser Browser kann keine Push-Nachrichten. Bitte am Handy (Home-Bildschirm-App) oder in Chrome einschalten.');
@@ -291,7 +291,7 @@ async function pushCard(box) {
   } else {
     const reg = await navigator.serviceWorker.getRegistration();
     const sub = reg && await reg.pushManager.getSubscription();
-    if (sub && Notification.permission === 'granted') { setStat('✅ Auf diesem Gerät eingeschaltet', true); on.textContent = 'Erneut verbinden'; }
+    if (sub && Notification.permission === 'granted') { setStat('✅ Auf diesem Gerät eingeschaltet', true); on.textContent = 'Erneut verbinden'; off.style.display = ''; }
     else if (Notification.permission === 'denied') setStat('❌ Benachrichtigungen sind blockiert. iPhone: Einstellungen → Mitteilungen → YILDIZ TAXI KG → Erlauben.');
     else setStat('Auf diesem Gerät noch aus.');
   }
@@ -305,8 +305,23 @@ async function pushCard(box) {
       const j = sub.toJSON();
       const r = await sb.from('push_subscriptions').upsert({ endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, device: navigator.userAgent.slice(0, 150) }, { onConflict: 'endpoint' });
       if (r.error) return toast(errMsg(r.error));
-      setStat('✅ Auf diesem Gerät eingeschaltet', true); toast('Eingeschaltet – sende Test…');
+      setStat('✅ Auf diesem Gerät eingeschaltet', true); on.textContent = 'Erneut verbinden'; off.style.display = ''; toast('Eingeschaltet – sende Test…');
       $('#ptest', box).click();
+    } catch (e) { toast('Fehler: ' + (e.message || e)); }
+  };
+  off.onclick = async () => {
+    if (!confirm('Erinnerungen auf diesem Gerät ausschalten?')) return;
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = reg && await reg.pushManager.getSubscription();
+      if (sub) {
+        const r = await sb.from('push_subscriptions').delete().eq('endpoint', sub.endpoint);
+        if (r.error) return toast(errMsg(r.error));
+        await sub.unsubscribe();
+      }
+      if (navigator.clearAppBadge) navigator.clearAppBadge().catch(() => {});
+      setStat('🔕 Auf diesem Gerät ausgeschaltet.'); on.textContent = 'Benachrichtigungen einschalten'; off.style.display = 'none';
+      toast('Erinnerungen ausgeschaltet');
     } catch (e) { toast('Fehler: ' + (e.message || e)); }
   };
   $('#ptest', box).onclick = async () => {
