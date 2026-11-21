@@ -79,12 +79,18 @@ textarea.out{width:100%;font:14px/1.45 ui-monospace,Menlo,monospace;padding:10px
 .drv input.km{width:100%;max-width:420px;padding:14px;border-radius:12px;border:0;font-size:18px;margin:14px 0;font-family:inherit}
 .big{font-size:19px;padding:17px;border-radius:14px;width:100%;max-width:420px}
 .dcard{background:#2a2d35;border-radius:16px;padding:18px;width:100%;max-width:420px;font-size:18px;text-align:center;line-height:1.5}
+.report-nav,.report-values>div{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.report-values{margin:8px 0 12px}.report-values dt{color:var(--mut)}.report-values dd{margin:0;font-variant-numeric:tabular-nums}
+.report-line{border-top:1px solid var(--line);padding-top:10px;margin-top:8px}
+#report-result summary{cursor:pointer;padding:6px 0}#report-result details[open]>summary{margin-bottom:10px}
+@media(max-width:390px){nav.bottom button{font-size:10px;min-width:0}}
 </style>
 </head>
 <body>
 <div id="app"></div>
 <div id="modal-root"></div>
 <div id="toast"></div>
+<script src="abrechnung.js"></script>
 <script>
 // ======= Einstellungen =======
 const SUPABASE_URL = 'https://kckxddllyfuhzchdqxyx.supabase.co';
@@ -154,7 +160,7 @@ function downloadCSV(name, rows) {
 }
 
 // ---------- Zustand ----------
-const S = { drivers: [], vehicles: [], settings: {}, tab: 'home', caseFilter: 'open', caseKind: '', caseQ: '', asgMode: 'now', asgVeh: '', asgDrv: '', asgCache: null, stammTab: 'fahrer' };
+const S = { drivers: [], vehicles: [], settings: {}, tab: location.hash === '#abrechnung' ? 'report' : 'home', caseFilter: 'open', caseKind: '', caseQ: '', asgMode: 'now', asgVeh: '', asgDrv: '', asgCache: null, stammTab: 'fahrer' };
 const drv = id => S.drivers.find(d => d.id === id);
 const drvName = id => drv(id)?.name || 'unbekannt';
 const vehPlate = id => S.vehicles.find(v => v.id === id)?.plate || '?';
@@ -214,7 +220,7 @@ function loginView(mode = 'in') {
 }
 
 // ---------- Chef-Bereich ----------
-const TABS = [['home', '🏠', 'Übersicht'], ['cases', '📄', 'Vorgänge'], ['who', '🔎', 'Wer fuhr?'], ['assign', '🚕', 'Zuteilung'], ['stamm', '⚙️', 'Stammdaten']];
+const TABS = [['home', '🏠', 'Übersicht'], ['cases', '📄', 'Vorgänge'], ['who', '🔎', 'Wer fuhr?'], ['assign', '🚕', 'Zuteilung'], ['report', '€', 'Abrechnung'], ['stamm', '⚙️', 'Stammdaten']];
 function adminShell() {
   $('#app').innerHTML = `<header class="top"><div class="brand">YILDIZ <span>TAXI</span></div><button class="btn sm pri" id="newCase">+ Vorgang</button></header>
     <div id="urgent" style="max-width:820px;margin:0 auto;padding:0 14px"></div>
@@ -233,7 +239,7 @@ function go(tab) {
   $$('nav.bottom button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   updateUrgent();
   const m = $('#main'); m.innerHTML = '<div class="empty">Lädt…</div>';
-  ({ home: viewHome, cases: viewCases, who: viewWho, assign: viewAssign, stamm: viewStamm })[tab](m)
+  ({ home: viewHome, cases: viewCases, who: viewWho, assign: viewAssign, report: viewAbrechnung, stamm: viewStamm })[tab](m)
     .catch(e => { m.innerHTML = `<div class="card">Fehler: ${esc(errMsg(e))}</div>`; });
   window.scrollTo(0, 0);
 }
@@ -689,7 +695,12 @@ function laAnswer(c) {
   $('#cp', body).onclick = async () => { try { await navigator.clipboard.writeText(text); toast('Kopiert'); } catch { $('textarea', body).select(); document.execCommand('copy'); toast('Kopiert'); } };
   $('#pr', body).onclick = () => {
     const w = window.open('', '_blank'); if (!w) return toast('Pop-up blockiert');
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Lenkerauskunft ${esc(c.reference || '')}</title><style>body{font:12pt/1.55 Arial,sans-serif;margin:25mm 22mm;white-space:pre-wrap}</style></head><body>${esc(text)}</body></html>`);
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Lenkerauskunft ${esc(c.reference || '')}</title><style>body{font:12pt/1.55 Arial,sans-serif;margin:25mm 22mm;white-space:pre-wrap}.report-nav,.report-values>div{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.report-values{margin:8px 0 12px}.report-values dt{color:var(--mut)}.report-values dd{margin:0;font-variant-numeric:tabular-nums}
+.report-line{border-top:1px solid var(--line);padding-top:10px;margin-top:8px}
+#report-result summary{cursor:pointer;padding:6px 0}#report-result details[open]>summary{margin-bottom:10px}
+@media(max-width:390px){nav.bottom button{font-size:10px;min-width:0}}
+</style></head><body>${esc(text)}</body></html>`);
     w.document.close(); w.focus(); setTimeout(() => w.print(), 300);
   };
   const a = $('#ans', body); if (a) a.onclick = async () => { await sb.from('cases').update({ status: 'beantwortet' }).eq('id', c.id); toast('Beantwortet'); refresh(); caseDetail(c.id); };
