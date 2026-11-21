@@ -15,48 +15,100 @@ function reportMoney(value) {
   return Number.isSafeInteger(value) ? money(value / 100) : '–';
 }
 
-function reportValues(fields, values) {
-  return '<dl class="report-values">' + fields.map(([key, label]) =>
-    '<div><dt>' + esc(label) + '</dt><dd>' + reportMoney(values[key]) + '</dd></div>'
-  ).join('') + '</dl>';
-}
-
-function reportOverview(sources) {
-  return reportSources.map(({ id, label, fields }) => {
+function reportTables(sources) {
+  function total(rows, read) {
+    const values = rows.map(read);
+    return values.every(Number.isSafeInteger) ? values.reduce((a, b) => a + b, 0) : null;
+  }
+  const overview = { title: 'Wochenübersicht', headers: ['Anbieter', 'Position', 'Betrag', 'Bericht'], rows: [] };
+  for (const { id, label, fields } of reportSources) {
     const source = sources[id];
-    if (!source) return '<section class="card"><h3>' + label + '</h3><div class="s">Kein Bericht für diese Woche.</div></section>';
-    const totals = {};
-    for (const [key] of fields) {
-      if (source.rows.every(row => Number.isSafeInteger(row.values[key]))) {
-        totals[key] = source.rows.reduce((sum, row) => sum + row.values[key], 0);
-      }
+    fields.forEach(([key, title], index) => {
+      overview.rows.push([index ? '' : label, title, source ? reportMoney(total(source.rows, r => r.values[key])) : '–',
+        index ? '' : !source ? 'Fehlt' : source.partial ? 'Teilbericht' : 'Vorhanden']);
+    });
+  }
+  const tables = [overview];
+  for (const id of ['40100', 'mypos']) {
+    const source = sources[id];
+    const taxi = id === '40100';
+    const columns = taxi ? [
+      ['Karte / App · Anzahl', r => r.counts?.card, false], ['Karte / App', r => r.values.card, true],
+      ['Rechnung · Anzahl', r => r.counts?.invoice, false], ['Rechnung', r => r.values.invoice, true]
+    ] : [
+      ['Kartenzahlungen', r => r.values.revenue, true], ['Gebühren', r => r.values.fee, true],
+      ['Nach Gebühren', r => Number.isSafeInteger(r.values.revenue) && Number.isSafeInteger(r.values.fee) ? r.values.revenue - r.values.fee : null, true]
+    ];
+    const format = (n, monetary) => monetary ? reportMoney(n) : Number.isSafeInteger(n) ? String(n) : '–';
+    tables.push({ title: taxi ? 'Taxi 40100 nach Fahrzeug' : 'myPOS nach Kennzeichen oder Terminal',
+      headers: [taxi ? 'Fahrzeug' : 'Kennzeichen / Terminal', ...columns.map(c => c[0])],
+      rows: (source?.rows || []).map(r => [r.name, ...columns.map(([,read,m]) => format(read(r), m))]),
+      sum: source && ['Summe', ...columns.map(([,read,m]) => format(total(source.rows, read), m))],
+      note: !source ? 'Kein Bericht für diese Woche.' : source.partial ? 'Teilbericht.' : '' });
+  }
+  const people = new Map();
+  for (const id of ['uber','bolt']) {
+    for (const r of sources[id]?.rows || []) {
+      const key = r.name.trim().normalize('NFC').replace(/\s+/g,' ').toLocaleLowerCase('de-AT');
+      const person = people.get(key) || { name: r.name };
+      person[id] = r.values;
+      people.set(key, person);
     }
-    const rows = source.rows.map(row => '<div class="report-line"><strong>' + esc(row.name) + '</strong>' + reportValues(fields, row.values) + '</div>').join('');
-    return '<section class="card"><h3>' + label + (source.partial ? ' · Teilbericht' : '') + '</h3>' +
-      reportValues(fields, totals) + '<details><summary>Einzelpositionen (' + source.rows.length + ')</summary>' + rows +
-      '<p class="s">' + esc(source.source) + ' · ' + fmtDT(source.updatedAt) + '</p><p class="s">' + esc(source.note) + '</p></details></section>';
-  }).join('');
+  }
+  const fields = [['uber','revenue'],['uber','net'],['bolt','net'],['bolt','cash'],['bolt','remaining']];
+  tables.push({ title: 'Fahrerabrechnung', headers: ['Fahrer','Uber Umsatz','Uber Netto','Bolt Verdienst','Bolt bar','Bolt Rest'],
+    rows: [...people.values()].sort((a,b) => a.name.localeCompare(b.name,'de')).map(p => [p.name,...fields.map(([id,k]) => reportMoney(p[id]?.[k]))]),
+    sum: people.size ? ['Summe', ...fields.map(([id,k]) => reportMoney(sources[id] ? total(sources[id].rows, r => r.values[k]) : null))] : null,
+    note: '– = keine Angabe. Der Bolt-Restbetrag ist der Verdienst abzüglich Barinkasso. Eine endgültige Fahrerauszahlung ist damit nicht bestätigt.' });
+  return tables;
 }
 
-function reportDrivers(sources) {
-  const byName = new Map();
-  const keyOf = name => name.trim().replace(/\s+/g, ' ').normalize('NFC').toLocaleLowerCase('de-AT');
-  const registry = new Map();
-  for (const driver of S.drivers) {
-    const key = keyOf(driver.name);
-    registry.set(key, registry.has(key) ? null : driver.name);
+function reportTableHtml(table) {
+  const cells = (row, tag) => '<tr>' + row.map(value => '<' + tag + '>' + esc(value) + '</' + tag + '>').join('') + '</tr>';
+  return '<section class="card"><h3>' + esc(table.title) + '</h3><div style="overflow-x:auto"><table class="week-table"><thead>' +
+    cells(table.headers,'th') + '</thead><tbody>' + table.rows.map(r => cells(r,'td')).join('') + '</tbody>' +
+    (table.sum ? '<tfoot>' + cells(table.sum,'td') + '</tfoot>' : '') + '</table></div>' +
+    (table.note ? '<p class="s">' + esc(table.note) + '</p>' : '') + '</section>';
+}
+
+function reportPdf(week, tables, sources) {
+  const period = fmtD(week) + ' bis ' + fmtD(addDays(week, 6));
+  const content = [{text:'YILDIZ TAXI KG',bold:true,color:'#735600',characterSpacing:1.6},
+    {text:'Wochenabrechnung',fontSize:24,bold:true,margin:[0,5,0,2]}, {text:period,color:'#495461',margin:[0,0,0,8]}];
+  for (const table of tables) {
+    const row = (cells, style) => cells.map((text,i) => ({text, ...style,
+      alignment: i && table.title !== 'Wochenübersicht' ? 'right' : 'left'}));
+    const body = [row(table.headers,{bold:true,fillColor:'#233443',color:'white'}), ...table.rows.map((r,i) => row(r,{fillColor:i%2 ? '#f2f5f6':'white'}))];
+    if (table.sum) body.push(row(table.sum,{bold:true,fillColor:'#fff1bc'}));
+    content.push({text:table.title,bold:true,fontSize:13,margin:[0,9,0,4],pageBreak:table.title==='Fahrerabrechnung'?'before':undefined},
+      {table:{headerRows:1,dontBreakRows:true,widths:table.headers.map((_,i) => i===0 ? '*' : 'auto'),body},layout:'noBorders'});
+    if (table.note) content.push({text:table.note,fontSize:8,color:'#44515b',margin:[0,4,0,0]});
   }
-  for (const { id, label, fields } of reportSources.slice(0, 2)) {
-    for (const row of sources[id]?.rows || []) {
-      const key = keyOf(row.name);
-      const driver = byName.get(key) || { name: registry.get(key) || row.name, sections: [] };
-      driver.sections.push('<strong>' + label + '</strong>' + reportValues(fields, row.values));
-      byName.set(key, driver);
-    }
+  content.push({text:'Quellen und Prüfvermerke',fontSize:13,bold:true,margin:[0,12,0,3]});
+  for (const {id,label} of reportSources) {
+    const s = sources[id];
+    content.push({text:label+' · '+(s?.source || 'Kein Bericht'),bold:true,margin:[0,5,0,1]});
+    if (s?.note) content.push({text:s.note,fontSize:8,color:'#45535e'});
   }
-  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name, 'de')).map(driver =>
-    '<details class="card"><summary>' + esc(driver.name) + '</summary>' + driver.sections.join('') + '</details>'
-  ).join('');
+  return {pageSize:'A4',pageMargins:[32,30,32,36],defaultStyle:{font:'Roboto',fontSize:9,color:'#182736'},
+    info:{title:'YILDIZ TAXI KG · Wochenabrechnung '+period},content,
+    footer:(page,count)=>({text:period+'   |   '+page+' / '+count,alignment:'right',fontSize:8,color:'#52616d',margin:[0,8,32,0]})};
+}
+
+let reportPdfLibraries;
+function loadReportPdfLibraries() {
+  const load = (file, integrity) => new Promise((resolve,reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/pdfmake@0.2.20/build/'+file;
+    script.integrity = integrity;
+    script.crossOrigin = 'anonymous';
+    script.onload = resolve;
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+  if (!reportPdfLibraries) reportPdfLibraries = load('pdfmake.min.js','sha384-G23ofMOEI98f9UnroUBjDi6Ll55Y5E6bOX4VAMJo0nIbuQRIxzn0g4athUOb58zs')
+    .then(() => load('vfs_fonts.js','sha384-pv+tpy6KGI5sKXJDf7oGPdvyVNKYXfAmDYpZ3r3PNP0d13PJQ6YMiiAEndd5sU15')).catch(error => {reportPdfLibraries=null; throw error;});
+  return reportPdfLibraries;
 }
 
 async function viewAbrechnung(main) {
@@ -85,9 +137,39 @@ async function viewAbrechnung(main) {
       const data = await response.json();
       if (request !== requestNumber || !result.isConnected) return;
       if (data.week !== week || !data.sources) throw Error();
-      const drivers = reportDrivers(data.sources);
-      result.innerHTML = reportOverview(data.sources) + (drivers ? '<h3>Fahrerabrechnung</h3>' + drivers : '') +
-        '<p class="s">Taxi 40100 wird nach Fahrzeug ausgewiesen, myPOS nach Kennzeichen oder Terminal. Kartenzahlungen werden nicht nochmals zum Umsatz addiert.</p>';
+      const tables = reportTables(data.sources);
+      result.innerHTML = '<button class="btn pri" style="margin-bottom:12px" id="report-pdf">PDF herunterladen</button>' +
+        tables.map(reportTableHtml).join('') +
+        '<details class="card"><summary>Quellen und Prüfvermerke</summary>' + reportSources.map(({id,label}) => {
+          const s = data.sources[id];
+          return '<p><b>'+label+'</b> · '+esc(s?.source || 'Kein Bericht')+'<br>'+esc(s?.note || '')+'</p>';
+        }).join('') + '</details>';
+      const button = $('#report-pdf', result);
+      button.onclick = async () => {
+        button.disabled = true;
+        button.textContent = 'PDF wird erstellt …';
+        try {
+          await loadReportPdfLibraries();
+          if (!button.isConnected) return;
+          const filename = 'Yildiz-Taxi-Abrechnung_'+data.week+'.pdf';
+          const pdf = window.pdfMake.createPdf(reportPdf(data.week,tables,data.sources));
+          const blob = await new Promise(resolve => pdf.getBlob(resolve));
+          if (!button.isConnected) return;
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url; link.download = filename; link.className = 'btn pri';
+          link.textContent = 'PDF herunterladen'; button.replaceWith(link);
+          link.click();
+          const observer = new MutationObserver(() => {
+            if (!link.isConnected) { URL.revokeObjectURL(url); observer.disconnect(); }
+          });
+          observer.observe(document.body,{childList:true,subtree:true});
+        } catch {
+          button.disabled = false;
+          button.textContent = 'PDF erneut laden';
+          toast('PDF konnte nicht erstellt werden.');
+        }
+      };
     } catch {
       if (request !== requestNumber || !result.isConnected) return;
       result.innerHTML = '<div class="card">Die Wochenberichte konnten nicht geladen werden. <button class="btn sm">Erneut versuchen</button></div>';
