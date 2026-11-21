@@ -115,7 +115,7 @@ async function viewAbrechnung(main) {
   const viennaDay = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Vienna', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
   let week = S.reportWeek || addDays(reportMonday(viennaDay), -7);
   main.innerHTML = '<h2>Abrechnung</h2><section class="card"><label class="f">Abrechnungswoche<input type="date" id="report-date"></label>' +
-    '<div class="report-nav"><button class="btn sm" data-step="-7" aria-label="Vorwoche">◀</button><strong id="report-range"></strong><button class="btn sm" data-step="7" aria-label="Folgewoche">▶</button></div></section>' +
+    '<div class="report-nav"><button class="btn sm" data-step="-7" aria-label="Vorwoche">◀</button><strong id="report-range"></strong><button class="btn sm" data-step="7" aria-label="Folgewoche">▶</button></div><div id="report-export" style="margin-top:12px"></div></section>' +
     '<div id="report-result" aria-live="polite"></div><a class="btn" target="_blank" rel="noopener noreferrer" href="' + REPORT_APP + '">Abrechnung in Floot öffnen</a>';
   const date = $('#report-date', main);
   const range = $('#report-range', main);
@@ -123,6 +123,9 @@ async function viewAbrechnung(main) {
   let requestNumber = 0;
   async function load() {
     const request = ++requestNumber;
+    const exportSlot = $('#report-export', main);
+    exportSlot.innerHTML = '<button type="button" class="btn pri block" id="report-pdf" disabled>PDF herunterladen</button>';
+    const button = $('#report-pdf', exportSlot);
     S.reportWeek = week;
     date.value = week;
     range.textContent = fmtD(week) + ' bis ' + fmtD(addDays(week, 6));
@@ -138,13 +141,12 @@ async function viewAbrechnung(main) {
       if (request !== requestNumber || !result.isConnected) return;
       if (data.week !== week || !data.sources) throw Error();
       const tables = reportTables(data.sources);
-      result.innerHTML = '<button class="btn pri" style="margin-bottom:12px" id="report-pdf">PDF herunterladen</button>' +
-        tables.map(reportTableHtml).join('') +
+      result.innerHTML = tables.map(reportTableHtml).join('') +
         '<details class="card"><summary>Quellen und Prüfvermerke</summary>' + reportSources.map(({id,label}) => {
           const s = data.sources[id];
           return '<p><b>'+label+'</b> · '+esc(s?.source || 'Kein Bericht')+'<br>'+esc(s?.note || '')+'</p>';
         }).join('') + '</details>';
-      const button = $('#report-pdf', result);
+      button.disabled = false;
       button.onclick = async () => {
         button.disabled = true;
         button.textContent = 'PDF wird erstellt …';
@@ -157,7 +159,7 @@ async function viewAbrechnung(main) {
           if (!button.isConnected) return;
           const url = URL.createObjectURL(blob);
           const link = document.createElement('a');
-          link.href = url; link.download = filename; link.className = 'btn pri';
+          link.href = url; link.download = filename; link.className = 'btn pri block';
           link.textContent = 'PDF herunterladen'; button.replaceWith(link);
           link.click();
           const observer = new MutationObserver(() => {

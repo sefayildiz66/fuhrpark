@@ -94,7 +94,7 @@ textarea.out{width:100%;font:14px/1.45 ui-monospace,Menlo,monospace;padding:10px
 <div id="app"></div>
 <div id="modal-root"></div>
 <div id="toast"></div>
-<script src="abrechnung.js"></script>
+<script src="abrechnung.js?v=20261122-pdf2"></script>
 <script>
 // ======= Einstellungen =======
 const SUPABASE_URL = 'https://kckxddllyfuhzchdqxyx.supabase.co';
@@ -362,6 +362,7 @@ async function viewHome(m) {
   const unknown = cs.filter(c => !c.driver_id && c.kind !== 'rechnung').length;
   const veh = S.vehicles.filter(v => v.active);
   m.innerHTML = `
+    <button class="btn pri block" style="margin-bottom:12px" id="home-report">Wochenabrechnung als PDF</button>
     ${!S.vehicles.length || !S.drivers.length ? `<div class="card" style="background:#fffbea"><b>Los geht's:</b> 1. Unter <b>Stammdaten</b> Fahrzeuge und Fahrer anlegen. 2. Unter <b>Zuteilung</b> eintragen, wer welches Auto ab wann fährt. Dann ordnet die App jede Strafe automatisch dem richtigen Fahrer zu.</div>` : ''}
     <div class="grid2">
       <div class="card stat" style="${over ? 'border-color:#f4b4ae;background:#fff5f4' : ''}"><b class="${over ? 'due-red' : ''}">${over}</b>überfällig</div>
@@ -375,6 +376,7 @@ async function viewHome(m) {
     </div>
     <h3 style="margin-top:6px">Nächste Fristen</h3>
     ${cs.length ? cs.slice(0, 12).map(caseItem).join('') : '<div class="card empty">Alles erledigt 👍</div>'}`;
+  $('#home-report', m).onclick = () => go('report');
 }
 
 // ---------- Vorgänge ----------
