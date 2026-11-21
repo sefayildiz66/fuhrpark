@@ -5,7 +5,7 @@ self.addEventListener('push', e => {
   let d = {};
   try { d = e.data.json(); } catch { d = { title: 'YILDIZ TAXI', body: e.data ? e.data.text() : '' }; }
   const jobs = [self.registration.showNotification(d.title || 'YILDIZ TAXI', {
-    body: d.body || '', icon: 'icon-192.png', badge: 'icon-192.png', tag: 'fristen', renotify: true, data: { url: d.url || './' }
+    body: d.body || '', icon: 'icon-192.png?v=2', badge: 'icon-192.png?v=2', tag: 'fristen', renotify: true, data: { url: d.url || './' }
   })];
   if (d.count && self.navigator && self.navigator.setAppBadge) jobs.push(self.navigator.setAppBadge(d.count).catch(() => {}));
   e.waitUntil(Promise.all(jobs));
