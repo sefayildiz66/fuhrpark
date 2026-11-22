@@ -13,7 +13,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error --max-time 40 'https://service.taxi4me.net/4010/unternehmer2.4/?sprache=de' -o "$RUNNER_TEMP/portal.html"
-          grep -qi 'Losungswort' "$RUNNER_TEMP/portal.html"
-          grep -qi 'Loginname' "$RUNNER_TEMP/portal.html"
-          echo 'Portal login page reached.'
+          url='https://service.taxi4me.net/4010/unternehmer2.4/?sprache=de'
+          curl -sSL --max-time 30 -o /dev/null -w 'HTTP %{http_code}, bytes %{size_download}\n' "$url"
+          google-chrome --headless --disable-gpu --virtual-time-budget=12000 --dump-dom "$url" > "$RUNNER_TEMP/portal.html"
+          if ! grep -Eqi '<input[^>]*type="password"' "$RUNNER_TEMP/portal.html"; then
+            echo 'Login form missing. Page title:'
+            grep -Eio '<title>[^<]{0,150}' "$RUNNER_TEMP/portal.html" || true
+            exit 1
+          fi
+          echo 'Rendered portal login form reached.'
