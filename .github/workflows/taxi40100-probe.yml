@@ -9,6 +9,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
+      - name: Check whether both portal secrets are configured
+        env:
+          LOGIN_READY: ${{ secrets.TAXI40100_USERNAME != '' && secrets.TAXI40100_PASSWORD != '' }}
+        run: |
+          if [ "$LOGIN_READY" != true ]; then
+            echo "Both portal secrets are required."
+            exit 1
+          fi
       - name: Check official login page
         shell: bash
         run: |
