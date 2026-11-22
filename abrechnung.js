@@ -71,10 +71,17 @@ function reportTableHtml(table) {
     (table.note ? '<p class="s">' + esc(table.note) + '</p>' : '') + '</section>';
 }
 
-function reportPdf(week, tables, sources) {
+function liveStand(data) {
+  if (!data.asOf) return '';
+  const time = new Intl.DateTimeFormat('de-AT', {timeZone:'Europe/Vienna',dateStyle:'short',timeStyle:'short'}).format(new Date(data.asOf));
+  return 'Vorläufiger Zwischenstand · Abruf '+time+' Uhr (Wien)';
+}
+
+function reportPdf(week, tables, sources, live = {}) {
   const period = fmtD(week) + ' bis ' + fmtD(addDays(week, 6));
   const content = [{text:'YILDIZ TAXI KG',bold:true,color:'#735600',characterSpacing:1.6},
     {text:'Wochenabrechnung',fontSize:24,bold:true,margin:[0,5,0,2]}, {text:period,color:'#495461',margin:[0,0,0,8]}];
+  if (live.asOf) content.push({text:[liveStand(live), ...(live.notices || [])].join('\n'), color:'#655000', margin:[0,0,0,8]});
   for (const table of tables) {
     const row = (cells, style) => cells.map((text,i) => ({text, ...style,
       alignment: i && table.title !== 'Wochenübersicht' ? 'right' : 'left'}));
@@ -113,9 +120,10 @@ function loadReportPdfLibraries() {
 
 async function viewAbrechnung(main) {
   const viennaDay = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Vienna', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-  let week = S.reportWeek || addDays(reportMonday(viennaDay), -7);
+  const currentWeek = reportMonday(viennaDay);
+  let week = S.reportWeek || currentWeek;
   main.innerHTML = '<h2>Abrechnung</h2><section class="card"><label class="f">Abrechnungswoche<input type="date" id="report-date"></label>' +
-    '<div class="report-nav"><button class="btn sm" data-step="-7" aria-label="Vorwoche">◀</button><strong id="report-range"></strong><button class="btn sm" data-step="7" aria-label="Folgewoche">▶</button></div><div id="report-export" style="margin-top:12px"></div></section>' +
+    '<button class="btn sm" id="current-week" style="margin-bottom:12px">Aktuelle Woche laden</button><div class="report-nav"><button class="btn sm" data-step="-7" aria-label="Vorwoche">◀</button><strong id="report-range"></strong><button class="btn sm" data-step="7" aria-label="Folgewoche">▶</button></div><div id="report-export" style="margin-top:12px"></div></section>' +
     '<div id="report-result" aria-live="polite"></div><a class="btn" target="_blank" rel="noopener noreferrer" href="' + REPORT_APP + '">Abrechnung in Floot öffnen</a>';
   const date = $('#report-date', main);
   const range = $('#report-range', main);
@@ -141,7 +149,7 @@ async function viewAbrechnung(main) {
       if (request !== requestNumber || !result.isConnected) return;
       if (data.week !== week || !data.sources) throw Error();
       const tables = reportTables(data.sources);
-      result.innerHTML = tables.map(reportTableHtml).join('') +
+      result.innerHTML = (data.asOf ? '<section class="card"><strong>'+esc(liveStand(data))+'</strong>'+(data.notices || []).map(n=>'<p class="s">'+esc(n)+'</p>').join('')+'</section>' : '') + tables.map(reportTableHtml).join('') +
         '<details class="card"><summary>Quellen und Prüfvermerke</summary>' + reportSources.map(({id,label}) => {
           const s = data.sources[id];
           return '<p><b>'+label+'</b> · '+esc(s?.source || 'Kein Bericht')+'<br>'+esc(s?.note || '')+'</p>';
@@ -154,7 +162,7 @@ async function viewAbrechnung(main) {
           await loadReportPdfLibraries();
           if (!button.isConnected) return;
           const filename = 'Yildiz-Taxi-Abrechnung_'+data.week+'.pdf';
-          const pdf = window.pdfMake.createPdf(reportPdf(data.week,tables,data.sources));
+          const pdf = window.pdfMake.createPdf(reportPdf(data.week,tables,data.sources,data));
           const blob = await new Promise(resolve => pdf.getBlob(resolve));
           if (!button.isConnected) return;
           const url = URL.createObjectURL(blob);
@@ -178,6 +186,7 @@ async function viewAbrechnung(main) {
       $('button', result).onclick = load;
     }
   }
+  $('#current-week', main).onclick = () => { week = currentWeek; load(); };
   date.onchange = () => { if (date.value) { week = reportMonday(date.value); load(); } };
   $$('[data-step]', main).forEach(button => button.onclick = () => { week = addDays(week, Number(button.dataset.step)); load(); });
   await load();
