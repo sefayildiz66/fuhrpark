@@ -1,0 +1,19 @@
+name: Taxi 40100 portal test
+on:
+  push:
+    branches: [test/40100-portal-access]
+    paths: [.github/workflows/taxi40100-probe.yml]
+permissions: {}
+jobs:
+  portal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check official login page
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 40 'https://service.taxi4me.net/4010/unternehmer2.4/?sprache=de' -o "$RUNNER_TEMP/portal.html"
+          grep -qi 'Losungswort' "$RUNNER_TEMP/portal.html"
+          grep -qi 'Loginname' "$RUNNER_TEMP/portal.html"
+          echo 'Portal login page reached.'
