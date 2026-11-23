@@ -843,9 +843,31 @@ async function viewStamm(m) {
   $('#st').onclick = e => { const b = e.target.closest('[data-s]'); if (b) { S.stammTab = b.dataset.s; viewStamm(m); } };
   const sbd = $('#sbody');
   if (S.stammTab === 'fahrer') {
-    sbd.innerHTML = `<button class="btn pri" id="dnew" style="margin-bottom:10px">+ Fahrer anlegen</button>` + (S.drivers.length ? S.drivers.map(d => `<button class="item" data-drv="${d.id}" style="${d.active ? '' : 'opacity:.55'}"><div class="t">${esc(d.name)}${d.active ? '' : ' (inaktiv)'}</div><div class="s">${[d.phone, d.licence_no ? 'FS ' + d.licence_no : '', !d.address || !d.birth_date || !d.licence_no ? '⚠️ Daten für Lenkerauskunft unvollständig' : ''].filter(Boolean).map(esc).join(' · ')}</div></button>`).join('') : '<div class="card empty">Noch keine Fahrer</div>');
-    $('#dnew').onclick = () => driverForm(null);
-    $$('[data-drv]', sbd).forEach(b => b.onclick = () => driverForm(drv(b.dataset.drv)));
+    const { data: asg } = await sb.from('assignments').select('driver_id,vehicle_id,from_date,to_date');
+    const nowCars = {};
+    (asg || []).filter(a => isActive(a)).forEach(a => (nowCars[a.driver_id] = nowCars[a.driver_id] || []).push(vehPlate(a.vehicle_id)));
+    const fold = s => String(s || '').toLocaleUpperCase('tr').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/İ/g, 'I').replace(/\s+/g, ' ').trim();
+    const nAct = S.drivers.filter(d => d.active).length, nIn = S.drivers.length - nAct;
+    S.drvFilter = S.drvFilter || 'aktiv'; S.drvQ = S.drvQ || '';
+    sbd.innerHTML = `<div class="row" style="margin-bottom:10px;flex-wrap:nowrap"><button class="btn pri" id="dnew" style="white-space:nowrap">+ Fahrer</button>
+        <input class="inp" id="dq" type="search" placeholder="Fahrer suchen…" value="${esc(S.drvQ)}" autocomplete="off"></div>
+      <div class="chips" id="df">${[['aktiv', `Aktiv (${nAct})`], ['inaktiv', `Inaktiv (${nIn})`], ['alle', `Alle (${S.drivers.length})`]].map(([k, l]) => `<button class="chip ${S.drvFilter === k ? 'on' : ''}" data-df="${k}">${l}</button>`).join('')}</div>
+      <div class="s" id="dcount" style="margin-bottom:8px"></div><div id="dlist"></div>`;
+    const item = d => `<button class="item" data-drv="${d.id}" style="${d.active ? '' : 'opacity:.6'}">
+        <div class="row" style="justify-content:space-between;flex-wrap:nowrap"><span class="t">${esc(d.name)}</span>${nowCars[d.id] ? `<span class="badge" style="background:#fff3c4;white-space:nowrap">🚕 ${esc(nowCars[d.id].join(', '))}</span>` : (d.active ? '' : '<span class="badge">inaktiv</span>')}</div>
+        <div class="s">${[d.phone, d.licence_no ? 'FS ' + d.licence_no : '', d.active && (!d.address || !d.birth_date || !d.licence_no) ? '⚠️ Daten für Lenkerauskunft unvollständig' : ''].filter(Boolean).map(esc).join(' · ')}</div></button>`;
+    const draw = () => {
+      const q = fold(S.drvQ);
+      const list = S.drivers.filter(d => (S.drvFilter === 'alle' || (S.drvFilter === 'aktiv' ? d.active : !d.active)) && (!q || fold(d.name).includes(q)))
+        .sort((a, b) => (b.active - a.active) || a.name.localeCompare(b.name, 'tr'));
+      $('#dcount', sbd).textContent = q ? `${list.length} Treffer für „${S.drvQ}“` : '';
+      $('#dlist', sbd).innerHTML = list.length ? list.map(item).join('') : `<div class="card empty">${q ? 'Kein Fahrer gefunden' : 'Keine Fahrer in dieser Liste'}</div>`;
+      $$('[data-drv]', sbd).forEach(b => b.onclick = () => driverForm(drv(b.dataset.drv)));
+    };
+    $('#df', sbd).onclick = e => { const b = e.target.closest('[data-df]'); if (!b) return; S.drvFilter = b.dataset.df; $$('#df .chip', sbd).forEach(x => x.classList.toggle('on', x === b)); draw(); };
+    $('#dq', sbd).oninput = e => { S.drvQ = e.target.value; if (S.drvQ && S.drvFilter !== 'alle') { S.drvFilter = 'alle'; $$('#df .chip', sbd).forEach(x => x.classList.toggle('on', x.dataset.df === 'alle')); } draw(); };
+    $('#dnew', sbd).onclick = () => driverForm(null);
+    draw();
   } else if (S.stammTab === 'autos') {
     sbd.innerHTML = `<button class="btn pri" id="vnew" style="margin-bottom:10px">+ Fahrzeug anlegen</button>` + (S.vehicles.length ? S.vehicles.map(v => `<button class="item" data-veh="${v.id}" style="${v.active ? '' : 'opacity:.55'}"><div class="t">${esc(v.plate)}${v.active ? '' : ' (inaktiv)'}</div><div class="s">${esc([v.model, v.notes].filter(Boolean).join(' · '))}</div></button>`).join('') : '<div class="card empty">Noch keine Fahrzeuge</div>');
     $('#vnew').onclick = () => vehicleForm(null);
