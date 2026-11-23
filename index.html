@@ -464,7 +464,8 @@ function parseDoc(text) {
 
 // ---------- Wer fuhr? (Anzeige) ----------
 const SHIFTS = { ganztags: 'Ganztags', tag: 'Tagschicht', nacht: 'Nachtschicht' };
-const rangeTxt = a => `${fmtD(a.from_date)} – ${a.to_date ? fmtD(a.to_date) : 'laufend'}`;
+const hhmm = t => t ? ' ' + String(t).slice(0, 5) : '';
+const rangeTxt = a => `${fmtD(a.from_date)}${hhmm(a.from_time)} – ${a.to_date ? fmtD(a.to_date) + hhmm(a.to_time) : 'laufend'}`;
 function whoHtml(rows, pick) {
   if (!rows.length) return '<div class="sug">Für dieses Auto ist um diese Zeit kein Fahrer eingetragen – unter „Zuteilung“ nachtragen.</div>';
   const ex = rows.filter(r => r.exact);
@@ -519,7 +520,7 @@ function caseForm(c = null, pre = {}) {
     const box = $('#whoSug', body), v = f.vehicle_id.value, t = f.incident_at.value, seq = ++sugSeq;
     if (!v || !t) { box.innerHTML = ''; return; }
     box.innerHTML = '<div class="sug">Suche, wer gefahren ist…</div>';
-    const { data, error } = await sb.rpc('who_drove_at', { p_vehicle: v, p_at: fromInputDT(t) });
+    const { data, error } = await sb.rpc('who_drove_at2', { p_vehicle: v, p_at: fromInputDT(t) });
     if (seq !== sugSeq) return;
     if (error) { box.innerHTML = ''; return; }
     box.innerHTML = whoHtml(data, true);
@@ -623,7 +624,7 @@ async function caseDetail(id) {
     <div class="row"><button class="btn" id="edBtn">Bearbeiten</button><button class="btn red" id="delBtn">Löschen</button></div>`);
 
   if (c.vehicle_id && c.incident_at) {
-    sb.rpc('who_drove_at', { p_vehicle: c.vehicle_id, p_at: c.incident_at }).then(({ data }) => {
+    sb.rpc('who_drove_at2', { p_vehicle: c.vehicle_id, p_at: c.incident_at }).then(({ data }) => {
       if (!data) return;
       const box = $('#whoBox', body); if (!box) return;
       box.innerHTML = whoHtml(data, true);
@@ -724,7 +725,7 @@ async function viewWho(m) {
   $('#wgo').onclick = async () => {
     const v = $('#wv').value, t = $('#wt').value; if (!t) return toast('Zeit eingeben');
     const res = $('#wres'); res.innerHTML = '<div class="empty">Suche…</div>';
-    const { data, error } = await sb.rpc('who_drove_at', { p_vehicle: v, p_at: fromInputDT(t) });
+    const { data, error } = await sb.rpc('who_drove_at2', { p_vehicle: v, p_at: fromInputDT(t) });
     if (error) { res.innerHTML = ''; return toast(errMsg(error)); }
     const ex = data.filter(r => r.exact), d = ex.length === 1 ? drv(ex[0].driver_id) : null;
     res.innerHTML = whoHtml(data, false) + (d ? `<div class="card"><h3>Fahrerdaten</h3><div class="kv">
@@ -760,7 +761,7 @@ async function viewAssign(m) {
     body.innerHTML = S.vehicles.filter(v => v.active).map(v => {
       const as = data.filter(a => a.vehicle_id === v.id && isActive(a));
       return `<div class="card"><div><b style="font-size:18px">${esc(v.plate)}</b> <span class="s">${esc(v.model || '')}</span></div>
-        ${as.length ? as.map(a => `<button class="item" data-asg="${a.id}" style="margin:10px 0 0"><div class="t">👤 ${esc(drvName(a.driver_id))}</div><div class="s">${SHIFTS[a.shift]} · seit ${fmtD(a.from_date)}${a.to_date ? ' bis ' + fmtD(a.to_date) : ''}</div></button>`).join('') : '<div class="due-org" style="margin-top:8px;font-size:14px">Kein Fahrer eingetragen</div>'}
+        ${as.length ? as.map(a => `<button class="item" data-asg="${a.id}" style="margin:10px 0 0"><div class="t">👤 ${esc(drvName(a.driver_id))}</div><div class="s">${SHIFTS[a.shift]} · seit ${fmtD(a.from_date)}${hhmm(a.from_time)}${a.to_date ? ' bis ' + fmtD(a.to_date) + hhmm(a.to_time) : ''}</div></button>`).join('') : '<div class="due-org" style="margin-top:8px;font-size:14px">Kein Fahrer eingetragen</div>'}
         <div class="row" style="margin-top:10px"><button class="btn sm pri" data-switch="${v.id}">${as.length ? 'Fahrerwechsel' : 'Fahrer eintragen'}</button><button class="btn sm" data-histv="${v.id}">Verlauf</button></div></div>`;
     }).join('') || '<div class="card empty">Keine aktiven Fahrzeuge</div>';
     $$('[data-switch]', body).forEach(b => b.onclick = () => assignForm(null, { vehicle_id: b.dataset.switch }, true));
@@ -794,20 +795,24 @@ async function assignForm(a, pre = {}, switchMode = false) {
     <label class="f">Fahrzeug<select name="vehicle_id" required><option value="">– wählen –</option>${S.vehicles.filter(v => v.active || v.id === a.vehicle_id).map(v => `<option value="${v.id}" ${v.id === a.vehicle_id ? 'selected' : ''}>${esc(v.plate)}${v.model ? ' – ' + esc(v.model) : ''}</option>`).join('')}</select></label>
     <label class="f">${switchMode ? 'Neuer Fahrer' : 'Fahrer'}<select name="driver_id" required><option value="">– wählen –</option>${S.drivers.filter(d => d.active || d.id === a.driver_id).map(d => `<option value="${d.id}" ${d.id === a.driver_id ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}</select></label>
     <label class="f">Schicht<select name="shift">${Object.entries(SHIFTS).map(([k, l]) => `<option value="${k}" ${a.shift === k ? 'selected' : ''}>${l}${k === 'tag' ? ` (${ds}–${ns})` : k === 'nacht' ? ` (${ns}–${ds})` : ''}</option>`).join('')}</select></label>
-    <div class="grid2"><label class="f">Von<input type="date" name="from_date" value="${a.from_date || ''}" required></label><label class="f">Bis <span style="font-weight:400">(leer = laufend)</span><input type="date" name="to_date" value="${a.to_date || ''}"></label></div>
+    <div class="grid2"><label class="f">Von (Datum)<input type="date" name="from_date" value="${a.from_date || ''}" required></label><label class="f">Uhrzeit <span style="font-weight:400">(Übergabe)</span><input type="time" name="from_time" value="${hhmm(a.from_time).trim()}"></label></div>
+    <div class="grid2"><label class="f">Bis (Datum) <span style="font-weight:400">leer = laufend</span><input type="date" name="to_date" value="${a.to_date || ''}"></label><label class="f">Uhrzeit <span style="font-weight:400">(Rückgabe)</span><input type="time" name="to_time" value="${hhmm(a.to_time).trim()}"></label></div>
     <div id="closeBox"></div>
     <label class="f">Notiz<input name="note" value="${esc(a.note)}"></label>
     <button class="btn pri block" type="submit">Speichern</button>
     ${isNew ? '' : '<button class="btn red block" type="button" id="adel" style="margin-top:10px">Zuteilung löschen</button>'}
   </form>`);
   const f = $('#afm', body);
-  const toClose = () => isNew && f.from_date.value ? S.asgCache.filter(x => x.vehicle_id === f.vehicle_id.value && !x.to_date && x.from_date < f.from_date.value && shiftClash(x.shift, f.shift.value)) : [];
-  const drawClose = () => { const c = toClose(); $('#closeBox', body).innerHTML = c.length ? `<label class="chk" style="margin-top:0"><input type="checkbox" id="doClose" checked> Bisherige Zuteilung beenden: ${c.map(x => esc(drvName(x.driver_id))).join(', ')} bis ${fmtD(addDays(f.from_date.value, -1))}</label>` : ''; };
-  ['vehicle_id', 'from_date', 'shift'].forEach(n => f[n].addEventListener('change', drawClose)); drawClose();
+  const toClose = () => isNew && f.from_date.value ? S.asgCache.filter(x => x.vehicle_id === f.vehicle_id.value && !x.to_date && shiftClash(x.shift, f.shift.value)
+      && (x.from_date < f.from_date.value || (x.from_date === f.from_date.value && f.from_time.value && hhmm(x.from_time || '00:00').trim() < f.from_time.value))) : [];
+  const closeEnd = () => f.from_time.value ? { to_date: f.from_date.value, to_time: f.from_time.value } : { to_date: addDays(f.from_date.value, -1), to_time: null };
+  const drawClose = () => { const c = toClose(), ce = c.length ? closeEnd() : null; $('#closeBox', body).innerHTML = c.length ? `<label class="chk" style="margin-top:0"><input type="checkbox" id="doClose" checked> Bisherige Zuteilung beenden: ${c.map(x => esc(drvName(x.driver_id))).join(', ')} bis ${fmtD(ce.to_date)}${hhmm(ce.to_time)}</label>` : ''; };
+  ['vehicle_id', 'from_date', 'from_time', 'shift'].forEach(n => f[n].addEventListener('change', drawClose)); drawClose();
   f.onsubmit = async e => {
     e.preventDefault();
-    const row = { vehicle_id: f.vehicle_id.value, driver_id: f.driver_id.value, shift: f.shift.value, from_date: f.from_date.value, to_date: f.to_date.value || null, note: f.note.value.trim() || null };
+    const row = { vehicle_id: f.vehicle_id.value, driver_id: f.driver_id.value, shift: f.shift.value, from_date: f.from_date.value, from_time: f.from_time.value || null, to_date: f.to_date.value || null, to_time: f.to_date.value ? (f.to_time.value || null) : null, note: f.note.value.trim() || null };
     if (row.to_date && row.to_date < row.from_date) return toast('„Bis“ liegt vor „Von“');
+    if (row.to_date === row.from_date && row.from_time && row.to_time && row.to_time < row.from_time) return toast('Rückgabe-Uhrzeit liegt vor der Übergabe');
     const closing = $('#doClose', body)?.checked ? toClose() : [];
     const others = S.asgCache.filter(x => x.id !== a.id && !closing.includes(x) && overlaps(x, row.from_date, row.to_date));
     const msgs = [
@@ -817,7 +822,7 @@ async function assignForm(a, pre = {}, switchMode = false) {
     if (msgs.length && !confirm('Überschneidung:\n' + msgs.slice(0, 4).join('\n') + '\n\nTrotzdem speichern?')) return;
     const btn = f.querySelector('[type=submit]'); btn.disabled = true;
     for (const x of closing) {
-      const r = await sb.from('assignments').update({ to_date: addDays(row.from_date, -1) }).eq('id', x.id);
+      const r = await sb.from('assignments').update(closeEnd()).eq('id', x.id);
       if (r.error) { btn.disabled = false; return toast(errMsg(r.error)); }
     }
     const res = isNew ? await sb.from('assignments').insert(row) : await sb.from('assignments').update(row).eq('id', a.id);
